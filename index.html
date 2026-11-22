@@ -56,6 +56,36 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <script>
+    // Auto-atualização: compara version.json (sem cache) com a versão guardada;
+    // se mudou, limpa service workers e caches e recarrega uma única vez.
+    (function () {
+      var base = document.querySelector('base').getAttribute('href') || '/';
+      fetch(base + 'version.json?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (v) {
+          if (!v || !v.version) return;
+          var old = null;
+          try { old = localStorage.getItem('cem_ver'); } catch (e) {}
+          if (old === v.version) return;
+          try { localStorage.setItem('cem_ver', v.version); } catch (e) { return; }
+          if (!old) return; // primeira visita: nada a limpar
+          var jobs = [];
+          if (navigator.serviceWorker) {
+            jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) { return r.unregister(); }));
+            }));
+          }
+          if (window.caches) {
+            jobs.push(caches.keys().then(function (ks) {
+              return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+            }));
+          }
+          Promise.all(jobs).then(function () { location.reload(); });
+        })
+        .catch(function () {});
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
