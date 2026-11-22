@@ -81,7 +81,13 @@
               return Promise.all(ks.map(function (k) { return caches.delete(k); }));
             }));
           }
-          Promise.all(jobs).then(function () { location.reload(); });
+          // Revalida os arquivos principais ignorando o cache HTTP antes de recarregar.
+          Promise.all(jobs).then(function () {
+            var files = ['', 'index.html', 'flutter_bootstrap.js', 'main.dart.js'];
+            return Promise.all(files.map(function (f) {
+              return fetch(base + f, { cache: 'reload' }).catch(function () {});
+            }));
+          }).then(function () { location.reload(); });
         })
         .catch(function () {});
     })();
