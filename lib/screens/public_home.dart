@@ -145,22 +145,23 @@ class PublicHome extends StatelessWidget {
           builder: (c, d) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (!desk) _MobileIntro(settings: d.settings, live: d.live),
               if (desk)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: SiteHero(
-                    tag: 'CEM PERU\u00cdBE',
+                    tag: 'CEM PERUÍBE',
                     light: 'ENCONTRO',
                     bold: 'COM CRISTO',
-                    body:
-                        'Quintas, 20h \u00e0s 21h30 \u00b7 Domingos, 19h \u00e0s 21h \u00b7 Av. Padre Anchieta, 3793, Peru\u00edbe.',
+                    body: _heroBody(d.settings),
                     primaryLabel: 'Ver eventos',
                     onPrimary: () => _openSub(c, 'Eventos', const _EventosList()),
-                    secondaryLabel: 'Ao vivo',
-                    onSecondary: () => _openSub(c, 'Ao vivo', const _AoVivo()),
-                    imageUrl: d.news.isNotEmpty
-                        ? d.news.first['image_url'] as String?
-                        : null,
+                    secondaryLabel:
+                        _isLive(d.live) ? 'Assistir ao vivo' : 'Como chegar',
+                    onSecondary: () => _isLive(d.live)
+                        ? _open(d.live!['youtube_url'] as String?)
+                        : _openMaps(d.settings),
+                    imageUrl: d.settings['hero_image_url'],
                   ),
                 ),              if (d.live != null &&
                   d.live!['is_live'] == true &&
@@ -179,8 +180,10 @@ class PublicHome extends StatelessWidget {
                 const SectionTitle('Dia de Yakisoba'),
                 _YakisobaCard(campaign: d.campaign!, session: session),
               ],
-              const SectionTitle('Sobre nós'),
-              _About(settings: d.settings),
+              if (desk || (d.settings['about_text'] ?? '').isNotEmpty) ...[
+                const SectionTitle('Sobre nós'),
+                _About(settings: d.settings, contact: desk),
+              ],
               const SizedBox(height: 24),
               _Footer(settings: d.settings),
             ],
@@ -418,25 +421,34 @@ class _QuickTiles extends StatelessWidget {
       (Icons.sensors, 'Ao vivo', () => go('Ao vivo', const _AoVivo())),
       (Icons.menu_book_outlined, 'Bíblia', () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BibliaScreen()))),
     ];
-    return Wrap(spacing: 10, runSpacing: 10, children: [
-      for (final x in tiles)
-        SizedBox(
-          width: 108,
-          child: GlassCard(
-            onTap: x.$3,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Column(children: [
-                Icon(x.$1, color: AppColors.primary, size: 26),
-                const SizedBox(height: 8),
-                Text(x.$2,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700)),
-              ]),
-            ),
+    Widget tile((IconData, String, VoidCallback) x, {double vpad = 16}) => GlassCard(
+          onTap: x.$3,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: vpad),
+            child: Column(children: [
+              Icon(x.$1, color: AppColors.primary, size: 26),
+              const SizedBox(height: 8),
+              Text(x.$2,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
+            ]),
           ),
-        ),
-    ]);
+        );
+    return LayoutBuilder(builder: (context, c) {
+      // Largo: uma linha só, ocupando toda a largura.
+      if (c.maxWidth >= 700) {
+        return Row(children: [
+          for (var i = 0; i < tiles.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: tile(tiles[i], vpad: 20)),
+          ],
+        ]);
+      }
+      final w = (c.maxWidth - 20) / 3;
+      return Wrap(spacing: 10, runSpacing: 10, children: [
+        for (final x in tiles) SizedBox(width: w, child: tile(x)),
+      ]);
+    });
   }
 }
 
@@ -601,8 +613,9 @@ class _OrderSheetState extends State<_OrderSheet> {
 }
 
 class _About extends StatelessWidget {
-  const _About({required this.settings});
+  const _About({required this.settings, this.contact = true});
   final Map<String, String> settings;
+  final bool contact;
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -621,7 +634,7 @@ class _About extends StatelessWidget {
             Text(about, style: t.bodyMedium?.copyWith(height: 1.5)),
             const SizedBox(height: 16),
           ],
-          if (times.isNotEmpty) ...[
+          if (contact && times.isNotEmpty) ...[
             Text('Cultos', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
             for (final x in times)
@@ -635,7 +648,7 @@ class _About extends StatelessWidget {
               ),
             const SizedBox(height: 12),
           ],
-          if (address.isNotEmpty) ...[
+          if (contact && address.isNotEmpty) ...[
             Text('Endereço',
                 style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
@@ -1039,6 +1052,178 @@ class _PublicWebBar extends StatelessWidget {
                     color: AppColors.siteOnAccent)),
           ),
         ],
+      ]),
+    );
+  }
+}
+
+// ───────────── Culto e endereço (dados de site_settings) ─────────────
+
+bool _isLive(Map<String, dynamic>? live) =>
+    live != null &&
+    live['is_live'] == true &&
+    (live['youtube_url'] as String?)?.isNotEmpty == true;
+
+List<String> _serviceTimes(Map<String, String> s) => (s['service_times'] ?? '')
+    .split('|')
+    .map((e) => e.trim())
+    .where((e) => e.isNotEmpty)
+    .toList();
+
+Future<void> _openMaps(Map<String, String> s) {
+  final url = s['maps_url'] ?? '';
+  if (url.isNotEmpty) return _open(url);
+  final a = s['address'] ?? '';
+  return _open('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(a)}');
+}
+
+/// Texto do hero a partir dos horários e do endereço cadastrados.
+String _heroBody(Map<String, String> s) {
+  final times = _serviceTimes(s).map((t) {
+    final i = t.indexOf(',');
+    if (i <= 0) return t;
+    final day = t.substring(0, i);
+    return '${day.endsWith('s') ? day : '${day}s'}${t.substring(i)}';
+  }).toList();
+  final parts = (s['address'] ?? '').split(' - ');
+  var addr = parts.first.trim();
+  if (parts.length > 1 && parts[1].contains(',')) {
+    addr = '$addr, ${parts[1].split(',').last.trim()}';
+  }
+  if (times.isEmpty && addr.isEmpty) {
+    return 'Quintas, 20h às 21h30 · Domingos, 19h às 21h · Av. Padre Anchieta, 3793, Peruíbe.';
+  }
+  return '${[...times, if (addr.isNotEmpty) addr].join(' · ')}.';
+}
+
+const _weekdays = {
+  'segunda': 1, 'terça': 2, 'terca': 2, 'quarta': 3, 'quinta': 4,
+  'sexta': 5, 'sábado': 6, 'sabado': 6, 'domingo': 7,
+};
+
+/// Índice do próximo culto e o rótulo ("Agora", "Hoje", "Amanhã", "Próximo").
+(int, String)? _nextService(List<String> times, DateTime now) {
+  int? best;
+  DateTime? bestAt;
+  for (var i = 0; i < times.length; i++) {
+    final low = times[i].toLowerCase();
+    final day = _weekdays[low.split(RegExp(r'[,\s-]')).first];
+    final m = RegExp(r'(\d{1,2})h(\d{2})?').firstMatch(low);
+    if (day == null || m == null) continue;
+    final ahead = (day - now.weekday + 7) % 7;
+    var at = DateTime(now.year, now.month, now.day + ahead,
+        int.parse(m.group(1)!), int.tryParse(m.group(2) ?? '') ?? 0);
+    // Culto que começou há menos de 2h ainda conta como "agora".
+    if (at.isBefore(now.subtract(const Duration(hours: 2)))) {
+      at = at.add(const Duration(days: 7));
+    }
+    if (bestAt == null || at.isBefore(bestAt)) {
+      best = i;
+      bestAt = at;
+    }
+  }
+  if (best == null || bestAt == null) return null;
+  final today = DateTime(now.year, now.month, now.day);
+  final days = DateTime(bestAt.year, bestAt.month, bestAt.day).difference(today).inDays;
+  final label = !bestAt.isAfter(now)
+      ? 'Agora'
+      : days == 0
+          ? 'Hoje'
+          : days == 1
+              ? 'Amanhã'
+              : 'Próximo';
+  return (best, label);
+}
+
+/// Abertura da home no celular: o tema da igreja, quando é o culto e onde.
+class _MobileIntro extends StatelessWidget {
+  const _MobileIntro({required this.settings, this.live});
+  final Map<String, String> settings;
+  final Map<String, dynamic>? live;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = AppColors.siteInk;
+    final times = _serviceTimes(settings);
+    final next = _nextService(times, DateTime.now());
+    final address = settings['address'] ?? '';
+    final liveNow = _isLive(live);
+    final body = TextStyle(fontSize: 15, height: 1.4, color: ink);
+    // Mesma pílula do hero do site.
+    const btnShape = StadiumBorder();
+    Widget line(IconData icon, Widget child) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 18, color: ink.withValues(alpha: .8)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: child),
+          ]),
+        );
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+      decoration: BoxDecoration(
+        color: AppColors.siteBg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('ENCONTRO',
+            style: siteFont(44, FontWeight.w300, spacing: 1.5, height: 1)),
+        Text('COM CRISTO', style: siteFont(44, FontWeight.w800, height: 1.05)),
+        const SizedBox(height: 20),
+        for (var i = 0; i < times.length; i++)
+          line(
+            Icons.schedule,
+            Row(children: [
+              Expanded(
+                child: Text(times[i],
+                    style: body.copyWith(
+                        fontWeight: next?.$1 == i ? FontWeight.w700 : FontWeight.w400)),
+              ),
+              if (next?.$1 == i)
+                Text(next!.$2,
+                    style: siteFont(16, FontWeight.w600,
+                        color: ink.withValues(alpha: .75), spacing: .4)),
+            ]),
+          ),
+        if (address.isNotEmpty)
+          line(Icons.place_outlined, Text(address, style: body)),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.siteAccent,
+                  foregroundColor: AppColors.siteOnAccent,
+                  minimumSize: const Size(0, 48),
+                  shape: btnShape),
+              onPressed: liveNow
+                  ? () => _open(live!['youtube_url'] as String?)
+                  : () => _openMaps(settings),
+              child: Text(liveNow ? 'Assistir ao vivo' : 'Como chegar',
+                  style: siteFont(19, FontWeight.w600,
+                      color: AppColors.siteOnAccent)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: ink,
+                  minimumSize: const Size(0, 48),
+                  side: BorderSide(color: ink.withValues(alpha: .6)),
+                  shape: btnShape),
+              onPressed: liveNow
+                  ? () => _openMaps(settings)
+                  : () => _openSub(context, 'Eventos', const _EventosList()),
+              child: Text(liveNow ? 'Como chegar' : 'Ver eventos',
+                  style: siteFont(19, FontWeight.w600, color: ink)),
+            ),
+          ),
+        ]),
       ]),
     );
   }
