@@ -1,0 +1,40 @@
+# Flutter Web - sem cache
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_mime.c>
+  AddType application/wasm .wasm
+  AddType application/javascript .js .mjs
+  AddType application/json .json .map
+  AddType application/manifest+json .webmanifest
+  AddType application/octet-stream .bin
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set Cache-Control "no-cache, no-store, must-revalidate, max-age=0"
+  Header always set Pragma "no-cache"
+  Header always set Expires "0"
+  Header always unset ETag
+  Header always unset Last-Modified
+  Header always set X-LiteSpeed-Cache-Control "no-cache"
+  Header always set CDN-Cache-Control "no-store"
+</IfModule>
+FileETag None
+
+<IfModule mod_expires.c>
+  ExpiresActive Off
+</IfModule>
+
+<IfModule LiteSpeed>
+  CacheDisable public /
+  CacheDisable private /
+</IfModule>
