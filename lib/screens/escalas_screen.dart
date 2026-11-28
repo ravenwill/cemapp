@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass.dart';
 import '../widgets/section.dart';
+import '../widgets/site_hero.dart';
 import '../widgets/ui.dart';
 import '../widgets/header_actions.dart' show SessionScope;
 import 'escala_editor_screen.dart';
@@ -71,7 +72,11 @@ Pill statusPill(String st) {
 
 /// Aba "Escalas": cartões-resumo; "Abrir escala" mostra equipe e músicas.
 class EscalasView extends StatefulWidget {
-  const EscalasView({super.key});
+  const EscalasView({super.key, this.sample});
+
+  /// Só para a prévia local: usa esta lista em vez de buscar no banco.
+  @visibleForTesting
+  final List<Map<String, dynamic>>? sample;
   @override
   State<EscalasView> createState() => _EscalasViewState();
 }
@@ -91,7 +96,7 @@ class _EscalasViewState extends State<EscalasView> {
 
   Future<void> _load() async {
     try {
-      final r = await loadSchedules();
+      final r = widget.sample ?? await loadSchedules();
       final limit = DateTime.now().subtract(const Duration(hours: 3));
       final next = r
           .where((s) => DateTime.parse(s['starts_at']).toLocal().isAfter(limit))
@@ -140,6 +145,35 @@ class _EscalasViewState extends State<EscalasView> {
             ),
           ),
         )
+      else if (MediaQuery.sizeOf(context).width >= 1024) ...[
+        // Desktop: a próxima escala no painel areia do site; as demais em linhas.
+        _NextEscala(s: _next.first, canManage: manage, onChanged: _load),
+        if (_next.length > 1) ...[
+          const SizedBox(height: 48),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              width: 220,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12, right: 24),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Depois',
+                      style: siteFont(36, FontWeight.w600,
+                          color: AppColors.foreground, height: 1)),
+                  const SizedBox(height: 4),
+                  Text(_next.length == 2 ? '1 escala' : '${_next.length - 1} escalas',
+                      style: TextStyle(fontSize: 13, color: AppColors.mutedForeground)),
+                ]),
+              ),
+            ),
+            Expanded(
+              child: Column(children: [
+                for (var i = 1; i < _next.length; i++)
+                  _EscalaRow(s: _next[i], first: i == 1, canManage: manage, onChanged: _load),
+              ]),
+            ),
+          ]),
+        ],
+      ]
       else ...[
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -216,6 +250,150 @@ class _EscalasViewState extends State<EscalasView> {
           ],
         ),
       );
+}
+
+Future<void> _openEscala(BuildContext context, Map<String, dynamic> s,
+    bool canManage, VoidCallback onChanged) async {
+  await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => EscalaDetailScreen(s: s, canManage: canManage)));
+  onChanged();
+}
+
+String _counts(Map<String, dynamic> s) {
+  final n = (s['schedule_members'] as List? ?? []).length;
+  final m = (s['schedule_songs'] as List? ?? []).length;
+  return '$n ${n == 1 ? 'pessoa' : 'pessoas'} · $m ${m == 1 ? 'música' : 'músicas'}';
+}
+
+List<String> _roles(Map<String, dynamic> s) => <String>[
+      for (final m in (s['schedule_members'] as List? ?? []))
+        if ((m['roles'] as Map?)?['name'] != null) m['roles']['name'] as String
+    ].toSet().toList();
+
+/// A próxima escala, no painel areia do hero do site (desktop).
+class _NextEscala extends StatelessWidget {
+  const _NextEscala({required this.s, required this.canManage, required this.onChanged});
+  final Map<String, dynamic> s;
+  final bool canManage;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = AppColors.siteInk;
+    final d = DateTime.parse(s['starts_at']).toLocal();
+    final roles = _roles(s);
+    final me = myMembership(s);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(40, 32, 40, 32),
+      decoration: BoxDecoration(
+        color: AppColors.siteBg,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        SizedBox(
+          width: 148,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${d.day}', style: siteFont(88, FontWeight.w800, height: .9)),
+            Text(mesesLongo[d.month - 1].toUpperCase(),
+                style: siteFont(24, FontWeight.w300, spacing: 2, height: 1.1)),
+          ]),
+        ),
+        Container(width: 1, height: 132, color: ink.withValues(alpha: .25)),
+        const SizedBox(width: 40),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${s['title']}'.toUpperCase(),
+                style: siteFont(48, FontWeight.w800, height: 1.0)),
+            const SizedBox(height: 12),
+            Text(
+              [
+                relDay(d),
+                '${diasSemana[d.weekday - 1]}, ${two(d.hour)}h${two(d.minute)}',
+                _counts(s),
+              ].join(' · '),
+              style: siteFont(22, FontWeight.w400,
+                  color: ink.withValues(alpha: .85), spacing: .4),
+            ),
+            if (roles.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(roles.join(' · '),
+                  style: TextStyle(
+                      fontSize: 15, height: 1.5, color: ink.withValues(alpha: .8))),
+            ],
+            const SizedBox(height: 20),
+            Row(children: [
+              FilledButton(
+                onPressed: () => _openEscala(context, s, canManage, onChanged),
+                style: FilledButton.styleFrom(
+                  backgroundColor: ink,
+                  foregroundColor: AppColors.siteBg,
+                  shape: const StadiumBorder(),
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                ),
+                child: Text('Abrir escala',
+                    style: siteFont(19, FontWeight.w600, color: AppColors.siteBg)),
+              ),
+              if (me != null) ...[
+                const SizedBox(width: 14),
+                statusPill('${me['status'] ?? 'pendente'}'),
+              ],
+            ]),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Uma escala futura em linha com fio (desktop).
+class _EscalaRow extends StatelessWidget {
+  const _EscalaRow(
+      {required this.s, required this.first, required this.canManage, required this.onChanged});
+  final Map<String, dynamic> s;
+  final bool first;
+  final bool canManage;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final d = DateTime.parse(s['starts_at']).toLocal();
+    final roles = _roles(s);
+    final me = myMembership(s);
+    final line = BorderSide(color: AppColors.border);
+    return InkWell(
+      onTap: () => _openEscala(context, s, canManage, onChanged),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          border: Border(top: first ? line : BorderSide.none, bottom: line),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          DateBlock(d, size: 52),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${s['title']}',
+                  style: t.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 2),
+              Text(
+                  [
+                    '${diasSemana[d.weekday - 1]}, ${two(d.hour)}h${two(d.minute)}',
+                    _counts(s),
+                    if (roles.isNotEmpty) roles.join(', '),
+                  ].join(' · '),
+                  style: t.bodyMedium?.copyWith(color: AppColors.mutedForeground)),
+            ]),
+          ),
+          const SizedBox(width: 16),
+          if (me != null) statusPill('${me['status'] ?? 'pendente'}'),
+          const SizedBox(width: 8),
+          Icon(Icons.chevron_right, size: 20, color: AppColors.mutedForeground),
+        ]),
+      ),
+    );
+  }
 }
 
 class _Card extends StatelessWidget {
